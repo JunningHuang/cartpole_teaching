@@ -72,9 +72,6 @@ class LQR_timevariant(object):
                 Pt = Pt_part1 + Pt_part2            
                 P_tplus1 = Pt   
             self.ks.append(ks[0])
-        ctrb = control.ctrb(A, B)
-        self.ctrb = ctrb
-        self.ctrb_rank = np.linalg.matrix_rank(ctrb)
 
     def apply(self, X):
         K_LQR = next(self.KS)
