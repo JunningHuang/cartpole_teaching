@@ -3,7 +3,7 @@
 #                O ball: m = 1 kg
 #               /
 #              /
-#             /  pole: R = 1 m
+#             /  pole: L = 1 m
 #            /
 #     ______/_____
 #    |            | Cart: M = 4 kg
@@ -16,6 +16,7 @@ import numpy as np
 import scipy.integrate as integrate
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from controller import LQR_discrete, LQR_continuous, LQR_scipy
 
 def derivate(q, t, u):
     """
@@ -30,11 +31,11 @@ def derivate(q, t, u):
     delta = m*sin(q[0])**2 + M
     
     dqdt[2] = - m*(q[2]**2)*sin(q[0])*cos(q[0])/delta  \
-    		  - (m+M)*G*sin(q[0])/delta/R  \
-    		  - u*cos(q[0])/delta/R
+    		  - (m+M)*G*sin(q[0])/delta/L  \
+    		  - u*cos(q[0])/delta/L
     
-    dqdt[3] = m*R*(q[2]**2)*sin(q[0])/delta   \
-    		 + m*R*G*sin(q[0])*cos(q[0])/delta/R  \
+    dqdt[3] = m*L*(q[2]**2)*sin(q[0])/delta   \
+    		 + m*L*G*sin(q[0])*cos(q[0])/delta/L  \
     		 + u/delta
  
     return dqdt
@@ -75,8 +76,8 @@ class Cartpole(object):
         y1 = 0.0
 
         ## the pos of the pendulum
-        x2 = R*sin(y[:,0]) + x1
-        y2 = -R*cos(y[:,0]) + y1
+        x2 = L*sin(y[:,0]) + x1
+        y2 = -L*cos(y[:,0]) + y1
 
         fig = plt.figure()
         ax = fig.add_subplot(121, autoscale_on=False, aspect='equal',\
@@ -129,16 +130,13 @@ class Cartpole(object):
         elif save == "gif":
             ani.save('cart-pole.gif', writer='PillowWriter', fps=30)
 
-def obtain_LQR(delta_time):
+def obtain_ABQR(delta_time, fixed_point_x, fixed_point_u):
     """
-    Obtain an LQR controller
+    Linearize the dynamics and obtain A, B, Q, R parameter for the LQR controller
     :param: delta_time is the time interval for intergration
     """
     from tools import linearization, euler_discritization
-    from controller import LQR_discrete, LQR_continuous
-    fixed_point_x = np.array([180*rad, 0.0, 0., 0.0])
-    fixed_poiot_u = 0.
-    A, B = linearization(fixed_point_x, fixed_poiot_u)
+    A, B = linearization(fixed_point_x, fixed_point_u)
     A, B = euler_discritization(A, B, delta_time)
     B = np.array([
                 [B[0]],
@@ -153,13 +151,32 @@ def obtain_LQR(delta_time):
                     [0,  0,  0, 1]
                 ])
     R = np.array([[1]])
-    lqr = LQR_discrete(A, B, Q, R, fixed_point_x, 2000)
-    return lqr
+    return A, B, Q, R
+
+def lqr_for_nonlinear(lqr, env, fixed_point_x, fixed_point_u, horizon=500):
+    st = env.reset()
+    sts = []
+
+    for i in range(horizon):
+        A, B, Q, R = obtain_ABQR(dt, fixed_point_x, fixed_point_u)
+        #lqr = LQR_discrete(A, B, Q, R, desired_x, 2000)
+        #lqr.reset()
+        #u = lqr.apply(st)
+
+        u = lqr.apply(A, B, Q, R, st)
+        st = env.step(st, u)
+
+        fixed_point_x = st
+        fixed_point_u = u       
+        
+        sts.append(st)
+    sts = np.array(sts)
+    return sts 
 
 if __name__ == "__main__":
     rad = np.pi/180
     G =  9.8 # acceleration due to gravity, in m/s^2
-    R = 1.0  # length of the pole (m)
+    L = 1.0  # length of the pole (m)
     M = 4.0  # mass of the cart (kg)
     m = 1.0  # mass of the ball at the end of the pole (kg)
 
@@ -172,21 +189,20 @@ if __name__ == "__main__":
     xdot = 0.0
     
     # initial state of the env
-    state = np.array([theta, x, dtheta, xdot])
+    init_state = np.array([theta, x, dtheta, xdot])
 
     # setup the LQR controller, don't forget to reset the controller
     # before apply it
-    lqr = obtain_LQR(dt)
+    desired_x = np.array([180*rad, 0.0, 0.0, 0.0])
+    fixed_point_x = init_state 
+    fixed_point_u = 0.
+    lqr = LQR_scipy(desired_x)
     lqr.reset()
     
     # starts the environment, control with an LQR time-invariant controller
-    env = Cartpole(dt, 1, state)
-    st = env.reset()
-    sts = []
+    env = Cartpole(dt, 1, init_state)
 
-    for i in range(500):
-        u = lqr.apply(st)         
-        st = env.step(st, u)
-        sts.append(st)
-    sts = np.array(sts)
+    # do linearization around the current state and previous action every timestep 
+    sts = lqr_for_nonlinear(lqr, env, fixed_point_x, fixed_point_u)
+    
     env.render(sts)

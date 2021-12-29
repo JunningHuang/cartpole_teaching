@@ -2,13 +2,14 @@ import numpy as np
 from numpy.linalg import multi_dot
 import control
 from copy import copy
+import scipy.linalg as sp_linalg
 
 class LQR_discrete(object):
-    def __init__(self, A, B, Q, R, offset, iters, gamma=1.):
+    def __init__(self, A, B, Q, R, x_desired, iters, gamma=1.):
         """
             We iteratively solve K here
         """
-        self.offset= offset
+        self.x_desired = x_desired
         # iterative solve k 
         ks_T = np.array([0., 0., 0., 0., 0., 0.])
         ks = [ks_T]         
@@ -29,27 +30,24 @@ class LQR_discrete(object):
             P_tplus1 = Pt   
         self.ks = copy(ks)
         self.K = ks[0]
-        #self.KS = iter(ks)
-        ctrb = control.ctrb(A, B)
-        self.ctrb = ctrb
-        self.ctrb_rank = np.linalg.matrix_rank(ctrb)
 
     def apply(self, X):
         """
         [-249.00376091, -127.40804975, -2.6776243, -51.43314285, -33.83664616, -7.11248171]
         """
         K_LQR = next(self.KS)
-        X = X - self.offset
+        X = X - self.x_desired
         return -np.dot(K_LQR, X)
 
     def reset(self):
         self.KS = iter(self.ks)
 
 class LQR_timevariant(object):
-    def __init__(self, As, Bs, Q, R, iters, gamma=1.):
+    def __init__(self, As, Bs, Q, R, x_desired, iters, gamma=1.):
         """
             We iteratively solve K here
         """
+        self.x_desired = x_desired
         self.ks = []
         for index in range(len(As)):
             A = As[index]
@@ -74,20 +72,20 @@ class LQR_timevariant(object):
                 Pt = Pt_part1 + Pt_part2            
                 P_tplus1 = Pt   
             self.ks.append(ks[0])
-        #self.KS = iter(ks)
         ctrb = control.ctrb(A, B)
         self.ctrb = ctrb
         self.ctrb_rank = np.linalg.matrix_rank(ctrb)
 
     def apply(self, X):
         K_LQR = next(self.KS)
+        X = X - self.x_desired
         return -np.dot(K_LQR, X)
 
     def reset(self):
         self.KS = iter(self.ks)
 
 class LQR_continuous(object):
-    def __init__(self, A, B, Q, R, offset, iters=None):
+    def __init__(self, A, B, Q, R, x_desired, iters=None):
         """
             We use some control library to solve K here
         """
@@ -96,11 +94,24 @@ class LQR_continuous(object):
         self.K = K
         self.ctrb = ctrb
         self.ctrb_rank = np.linalg.matrix_rank(ctrb)
-        self.offset = offset
+        self.x_desired = x_desired
 
     def apply(self, X):
-        X = X - self.offset
+        X = X - self.x_desired
         return -np.dot(self.K, X)
     
     def reset(self):
         return 
+
+class LQR_scipy(object):
+    def __init__(self, x_desired, iters=None):
+        self.x_desired = x_desired
+
+    def apply(self, A, B, Q, R, X):
+        P = sp_linalg.solve_discrete_are(A, B, Q, R)
+        K = np.dot(np.linalg.pinv(R + np.dot(B.T, np.dot(P, B))), np.dot(B.T, np.dot(P, A)))
+        X = X - self.x_desired
+        return -np.dot(K, X)[0]
+    
+    def reset(self):
+        return
