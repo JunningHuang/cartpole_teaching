@@ -101,14 +101,13 @@ class LQR_continuous(object):
         return 
 
 class LQR_scipy(object):
-    def __init__(self, x_desired, iters=None):
-        self.x_desired = x_desired
+    def __init__(self, iters=None):
+        self.iters = iters
 
-    def apply(self, A, B, Q, R, X):
+    def getK(self, A, B, Q, R):
         P = sp_linalg.solve_discrete_are(A, B, Q, R)
         K = np.dot(np.linalg.pinv(R + np.dot(B.T, np.dot(P, B))), np.dot(B.T, np.dot(P, A)))
-        X = X - self.x_desired
-        return -np.dot(K, X)[0]
+        return K
     
     def reset(self):
         return

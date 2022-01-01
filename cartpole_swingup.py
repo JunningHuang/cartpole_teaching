@@ -135,7 +135,10 @@ def obtain_ABQR(delta_time, fixed_point_x, fixed_point_u):
     Linearize the dynamics and obtain A, B, Q, R parameter for the LQR controller
     :param: delta_time is the time interval for intergration
     """
-    from tools import linearization, euler_discritization
+    from tools import linearization, euler_discritization, nonlinear_dynamics
+    f_xu = nonlinear_dynamics(fixed_point_x, fixed_point_u)
+    f_xu_discrete = f_xu * delta_time
+    
     A, B = linearization(fixed_point_x, fixed_point_u)
     A, B = euler_discritization(A, B, delta_time)
     B = np.array([
@@ -151,27 +154,48 @@ def obtain_ABQR(delta_time, fixed_point_x, fixed_point_u):
                     [0,  0,  0, 1]
                 ])
     R = np.array([[1]])
-    return A, B, Q, R
+    return A, B, Q, R, f_xu_discrete
 
-def lqr_for_nonlinear(lqr, env, fixed_point_x, fixed_point_u, horizon=500):
-    st = env.reset()
-    sts = []
+def lqr_iter_forward(lqr, env, horizon=500):
+    xt = env.reset()
+    xts = []
+    fixed_point_x = xt 
+    fixed_point_u = 0.
+    ut = fixed_point_u
 
     for i in range(horizon):
-        A, B, Q, R = obtain_ABQR(dt, fixed_point_x, fixed_point_u)
-        #lqr = LQR_discrete(A, B, Q, R, desired_x, 2000)
-        #lqr.reset()
-        #u = lqr.apply(st)
+        A, B, Q, R, f_xu = obtain_ABQR(dt, fixed_point_x, fixed_point_u)
+        xt = env.step(xt, ut)
+        Kt = lqr.getK(A, B, Q, R) 
+        delta_xt = xt - desired_state 
+        ut = -np.dot(Kt, delta_xt)[0]
 
-        u = lqr.apply(A, B, Q, R, st)
-        st = env.step(st, u)
-
-        fixed_point_x = st
-        fixed_point_u = u       
+        fixed_point_x = xt
+        fixed_point_u = ut       
         
-        sts.append(st)
-    sts = np.array(sts)
-    return sts 
+        xts.append(xt)
+    xts = np.array(xts)
+    return xts 
+
+def lqr_one_fixed_point(lqr, env, horizon=500):
+    fixed_point_x = desired_state 
+    fixed_point_u = 0.
+    xt = env.reset()
+    xts = []
+    A, B, Q, R, f_xu = obtain_ABQR(dt, fixed_point_x, fixed_point_u)
+    
+    for i in range(horizon):
+        Kt = lqr.getK(A, B, Q, R) 
+        delta_xt = xt - fixed_point_x
+        ut = -np.dot(Kt, delta_xt)[0] + fixed_point_u
+        xt = env.step(xt, ut)
+    
+        xts.append(xt)
+    xts = np.array(xts)
+    return xts
+
+def ilqr():
+    pass
 
 if __name__ == "__main__":
     rad = np.pi/180
@@ -183,26 +207,25 @@ if __name__ == "__main__":
     dt = 0.03 # integral inteval 
 
     # initial conditions
-    theta = 140*rad 
+    theta = 120*rad 
     x = 0.0
     dtheta = 0.0
     xdot = 0.0
     
     # initial state of the env
     init_state = np.array([theta, x, dtheta, xdot])
-
-    # setup the LQR controller, don't forget to reset the controller
-    # before apply it
-    desired_x = np.array([180*rad, 0.0, 0.0, 0.0])
-    fixed_point_x = init_state 
-    fixed_point_u = 0.
-    lqr = LQR_scipy(desired_x)
-    lqr.reset()
+    desired_state = np.array([180*rad, 0.0, 0.0, 0.0])
     
     # starts the environment, control with an LQR time-invariant controller
     env = Cartpole(dt, 1, init_state)
+    lqr = LQR_scipy()
 
-    # do linearization around the current state and previous action every timestep 
-    sts = lqr_for_nonlinear(lqr, env, fixed_point_x, fixed_point_u)
+    # do linearization around a global fixed point, f(x^*, u^*) = x^*
+    #xts = lqr_one_fixed_point(lqr, env)
+
+    # do linearization iteratively 
+    xts = lqr_iter_forward(lqr, env) 
+
+    # do ilqr
     
-    env.render(sts)
+    env.render(xts)
